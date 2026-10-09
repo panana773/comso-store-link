@@ -106,16 +106,16 @@ module.exports = async function handler(req, res) {
     return reply(res, error.message === 'BODY_TOO_LARGE' ? 413 : 400,
       { ok: false, message: '요청 데이터가 올바르지 않습니다.' });
   }
-  if (!body || !['getStoreData', 'submitOrder'].includes(body.action)) {
+  if (!body || !['getStoreData', 'getBuyerData', 'submitOrder'].includes(body.action)) {
     return reply(res, 400, { ok: false, message: '지원하지 않는 작업입니다.' });
   }
   let order;
-  if (body.action === 'submitOrder') {
+  if (['submitOrder', 'getBuyerData'].includes(body.action)) {
     if (!body.order || typeof body.order !== 'object' || Array.isArray(body.order)) {
       return reply(res, 400, { ok: false, message: '구매 요청이 올바르지 않습니다.' });
     }
     order = {};
-    for (const key of ['name', 'studentId', 'orderId', 'quantities', 'expectedTotal', 'paymentConfirmed']) {
+    for (const key of ['name', 'studentId', 'orderId', 'quantities', 'expectedTotal', 'paymentConfirmed', 'purchaseDate']) {
       order[key] = body.order[key];
     }
   }
@@ -139,7 +139,7 @@ module.exports = async function handler(req, res) {
     if (body.action === 'getStoreData' && (!result.data || !Array.isArray(result.data.products))) {
       throw new Error('UPSTREAM_FORMAT');
     }
-    if (body.action === 'submitOrder' && (!result.data || typeof result.data.success !== 'boolean')) {
+    if (['submitOrder', 'getBuyerData'].includes(body.action) && (!result.data || typeof result.data.success !== 'boolean')) {
       throw new Error('UPSTREAM_FORMAT');
     }
     return reply(res, 200, { ok: true, data: result.data });
