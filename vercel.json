@@ -1,10 +1,24 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "redirects": [
+  "framework": null,
+  "buildCommand": "",
+  "installCommand": "",
+  "outputDirectory": "public",
+  "functions": {
+    "api/store.js": { "maxDuration": 30 }
+  },
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "X-Frame-Options", "value": "DENY" }
+      ]
+    },
     {
       "source": "/",
-      "destination": "https://script.google.com/macros/s/AKfycbw9XONJ0FifmpR9GrxAtL_6_rg69ucopttEQ6Rh3HUnrrtXSi_iMw-6fk-O9hUJE2ol/exec",
-      "permanent": false
+      "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
     }
   ]
 }

@@ -2,10 +2,393 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
+  <title>컴소편의점 | 물품 재고</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>컴소편의점</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f5f7fb; color: #182230; font-family: Arial, "Noto Sans KR", sans-serif; }
+    main { max-width: 960px; margin: auto; padding: 32px 20px; }
+    [hidden] { display: none !important; }
+    h1 { margin-bottom: 8px; font-size: 28px; }
+    .brand { color: #475467; font-size: 14px; line-height: 1.6; }
+    .description, #status { color: #667085; line-height: 1.7; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0; }
+    button { padding: 12px 18px; border: 0; border-radius: 10px; background: #2563eb; color: white; font-size: 15px; cursor: pointer; }
+    button:disabled { opacity: .4; cursor: not-allowed; }
+    button:focus-visible, input:focus-visible { outline: 3px solid #93c5fd; outline-offset: 3px; }
+    .secondary { background: #e4e7ec; color: #182230; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .card, .panel { padding: 20px; border: 1px solid #e4e7ec; border-radius: 16px; background: white; }
+    .card h2, .card h3 { margin: 0 0 12px; font-size: 17px; overflow-wrap: anywhere; }
+    .stock { margin: 0; color: #2563eb; font-size: 24px; font-weight: bold; }
+    .sold-out { color: #b42318; }
+    .panel { margin: 20px 0; }
+    label { display: block; margin-bottom: 16px; font-weight: bold; }
+    label:last-child { margin-bottom: 0; }
+    input { display: block; width: 100%; margin-top: 8px; padding: 12px; border: 1px solid #98a2b3; border-radius: 8px; font: inherit; }
+    .rule { color: #475467; line-height: 1.8; }
+    .counter { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 16px; }
+    .counter button { width: 40px; height: 40px; padding: 0; font-size: 22px; }
+    .counter output { font-size: 22px; font-weight: bold; }
+    .remaining { color: #667085; font-size: 14px; }
+    #selection-summary { line-height: 1.8; font-weight: bold; }
+    #order-status { white-space: pre-line; overflow-wrap: anywhere; }
+    .image-box { height: 150px; margin-bottom: 16px; display: grid; place-items: center; border-radius: 10px; background: white; overflow: hidden; }
+    .product-image { width: 100%; height: 150px; padding: 8px; object-fit: contain; }
+    .image-fallback { color: #667085; font-size: 13px; text-align: center; }
+    dialog { width: min(520px, calc(100% - 32px)); max-height: calc(100dvh - 32px); padding: 24px; border: 0; border-radius: 16px; color: #182230; overflow-y: auto; }
+    dialog::backdrop { background: rgb(16 24 40 / 55%); }
+    dialog h2 { margin: 0 0 16px; font-size: 22px; }
+    .order-line { padding: 12px 0; border-bottom: 1px solid #e4e7ec; display: flex; gap: 12px; justify-content: space-between; }
+    .order-line span:last-child { white-space: nowrap; }
+    .total { display: flex; justify-content: space-between; gap: 12px; margin: 20px 0; font-size: 20px; font-weight: bold; }
+    .total strong { color: #2563eb; white-space: nowrap; }
+    .account { padding: 16px; border-radius: 10px; background: #eff6ff; line-height: 1.8; overflow-wrap: anywhere; }
+    .dialog-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+    .dialog-actions button { flex: 1; }
+    @media (min-width: 760px) { .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+    @media (max-width: 360px) { .grid { grid-template-columns: 1fr; } }
+  </style>
 </head>
 <body>
-  <p>컴소편의점 접속 페이지입니다.</p>
+<main>
+  <p class="brand">뉴-네오 어라이징/넥스트 제네레이션 컴소편의점 2학기</p>
+  <section id="stock-page">
+    <h1>물품 재고</h1>
+    <p class="description">현재 남아 있는 물품을 확인하세요.</p>
+    <div class="toolbar">
+      <button id="refresh" type="button" onclick="loadStock()">재고 새로고침</button>
+      <button id="open-purchase" type="button" onclick="openPurchase()" disabled>구매하러 가기</button>
+    </div>
+    <div id="products" class="grid"></div>
+  </section>
+  <section id="purchase-page" hidden>
+    <button id="back-to-stock" class="secondary" type="button" onclick="showStock()">← 재고 화면</button>
+    <h1>물품 구매</h1>
+    <div class="panel">
+      <label for="buyer-name">이름<input id="buyer-name" type="text" maxlength="40" placeholder="이름 입력" autocomplete="off" required></label>
+      <label for="student-id">학번<input id="student-id" type="text" inputmode="numeric" maxlength="20" placeholder="학번 입력" autocomplete="off" required></label>
+    </div>
+    <div class="panel rule">
+      <strong>구매 1회당 선택 가능 수량</strong><br>
+      라면: 세 상품 합계 최대 2개<br>컵밥: 세 상품 합계 최대 2개<br>
+      몬스터: 최대 3개<br>초콜릿: 최대 2개<br>각 상품의 남은 재고를 초과할 수 없습니다.
+    </div>
+    <div id="purchase-products" class="grid"></div>
+    <div class="panel">
+      <p id="selection-summary" aria-live="polite"></p>
+      <button id="confirm-purchase" type="button" onclick="confirmPurchase()" disabled>구매 확정</button>
+      <p id="order-status" class="description" role="status" aria-live="polite"></p>
+    </div>
+  </section>
+  <p id="status" role="status" aria-live="polite"></p>
+</main>
+
+<!-- 첫 번째 팝업: 목록, 금액, 계좌 -->
+<dialog id="summary-dialog" aria-labelledby="summary-title">
+  <h2 id="summary-title">구매 내역 확인</h2>
+  <p id="summary-buyer" class="description"></p>
+  <div id="summary-lines"></div>
+  <div class="total"><span>총 가격</span><strong id="summary-total"></strong></div>
+  <div class="account"><strong>입금 계좌</strong><br><span id="summary-account"></span></div>
+  <p class="description">위 계좌로 정확한 금액을 입금한 뒤 구매를 확정해 주세요.</p>
+  <div class="dialog-actions">
+    <button class="secondary" type="button" onclick="closeSummary()">뒤로가기</button>
+    <button type="button" onclick="openPaymentConfirm()">구매 확정</button>
+  </div>
+</dialog>
+
+<!-- 두 번째 팝업: 입금 여부 확인 -->
+<dialog id="payment-dialog" aria-labelledby="payment-title">
+  <h2 id="payment-title">정확한 금액을 입금하셨습니까?</h2>
+  <p id="payment-total" class="description"></p>
+  <div class="dialog-actions">
+    <button class="secondary" type="button" onclick="backToSummary()">아니요</button>
+    <button type="button" onclick="submitConfirmedOrder()">네</button>
+  </div>
+</dialog>
+
+<script>
+  // 브라우저는 같은 Vercel 사이트의 API만 호출합니다.
+  // Apps Script 주소와 비밀키는 Vercel 서버의 환경변수에만 보관합니다.
+  async function requestStore(action, order) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 32000);
+    try {
+      const response = await fetch('/api/store', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        cache: 'no-store',
+        signal: controller.signal,
+        body: JSON.stringify({ action: action, order: order })
+      });
+      const result = await response.json();
+      if (!response.ok || !result || result.ok !== true) {
+        throw new Error(result && result.message || '서버 응답을 확인하지 못했습니다.');
+      }
+      return result.data;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  const storeApi = {
+    getData() { return requestStore('getStoreData'); },
+    submit(order) { return requestStore('submitOrder', order); }
+  };
+  const EXPECTED_NAMES = ['까르보불닭', '신라면 투움바', '신라면 블랙', '순후추돼지국밥', '제육덮밥', '햇반', '몬스터', '초콜릿'];
+  let products = [];
+  let limits = { ramen: 2, rice: 2, monster: 3, chocolate: 2 };
+  let account = null;
+  let quantities = Array(8).fill(0);
+  let loading = false;
+  let stockReady = false;
+  let submitting = false;
+  let draftOrder = null;
+  let pendingOrder = null;
+  const $ = id => document.getElementById(id);
+  const won = value => value.toLocaleString('ko-KR') + '원';
+  const modalOpen = () => $('summary-dialog').open || $('payment-dialog').open;
+  const locked = () => submitting || !!pendingOrder || !!draftOrder;
+
+  function groupTotal(group) {
+    return products.reduce((sum, p, i) => sum + (p.group === group ? quantities[i] : 0), 0);
+  }
+  function canIncrease(index) {
+    const p = products[index];
+    return !!p && stockReady && !loading && !locked() &&
+      quantities[index] < p.stock && groupTotal(p.group) < limits[p.group];
+  }
+  function changeQuantity(index, amount) {
+    if (locked()) return;
+    if (amount === 1 && canIncrease(index)) quantities[index]++;
+    if (amount === -1 && quantities[index] > 0) quantities[index]--;
+    updateControls();
+  }
+  function updateControls() {
+    for (let i = 0; i < 8; i++) {
+      if ($('quantity-' + i)) $('quantity-' + i).textContent = quantities[i];
+      if ($('minus-' + i)) $('minus-' + i).disabled = locked() || quantities[i] === 0;
+      if ($('plus-' + i)) $('plus-' + i).disabled = !canIncrease(i);
+    }
+    $('selection-summary').textContent =
+      '라면 ' + groupTotal('ramen') + '/2개 · 컵밥 ' + groupTotal('rice') + '/2개 · ' +
+      '몬스터 ' + groupTotal('monster') + '/3개 · 초콜릿 ' + groupTotal('chocolate') + '/2개';
+    $('buyer-name').disabled = locked();
+    $('student-id').disabled = locked();
+    $('back-to-stock').disabled = locked();
+    $('refresh').disabled = loading || locked();
+    $('open-purchase').disabled = !stockReady || loading || locked();
+    const button = $('confirm-purchase');
+    button.textContent = submitting ? '구매 처리 중…' : pendingOrder ? '같은 주문으로 다시 확인' : '구매 확정';
+    button.disabled = submitting || !!draftOrder || (!pendingOrder &&
+      (!stockReady || loading || quantities.every(q => q === 0)));
+  }
+  function appendProductImage(card, product) {
+    const box = document.createElement('div');
+    box.className = 'image-box';
+    const image = document.createElement('img');
+    image.className = 'product-image';
+    image.alt = product.name;
+    image.src = product.image;
+    image.loading = 'lazy';
+    image.addEventListener('error', function () {
+      const fallback = document.createElement('span');
+      fallback.className = 'image-fallback';
+      fallback.textContent = '사진을 불러오지 못했습니다';
+      box.replaceChildren(fallback);
+    }, { once: true });
+    box.append(image);
+    card.append(box);
+  }
+  function renderStock() {
+    $('products').replaceChildren();
+    products.forEach(function (p) {
+      const card = document.createElement('article');
+      card.className = 'card';
+      appendProductImage(card, p);
+      const name = document.createElement('h2');
+      name.textContent = p.name;
+      const count = document.createElement('p');
+      count.className = 'stock' + (p.stock === 0 ? ' sold-out' : '');
+      count.textContent = p.stock === 0 ? '품절' : p.stock + '개';
+      card.append(name, count);
+      $('products').append(card);
+    });
+  }
+  function renderPurchase() {
+    $('purchase-products').replaceChildren();
+    products.forEach(function (p, i) {
+      const card = document.createElement('article');
+      card.className = 'card';
+      appendProductImage(card, p);
+      const name = document.createElement('h3');
+      name.textContent = p.name;
+      const remaining = document.createElement('p');
+      remaining.className = 'remaining';
+      remaining.textContent = '남은 재고: ' + p.stock + '개';
+      const counter = document.createElement('div');
+      counter.className = 'counter';
+      const minus = document.createElement('button');
+      minus.type = 'button'; minus.id = 'minus-' + i; minus.textContent = '−';
+      minus.setAttribute('aria-label', p.name + ' 수량 줄이기');
+      minus.onclick = () => changeQuantity(i, -1);
+      const quantity = document.createElement('output');
+      quantity.id = 'quantity-' + i;
+      quantity.setAttribute('aria-label', p.name + ' 선택 수량');
+      const plus = document.createElement('button');
+      plus.type = 'button'; plus.id = 'plus-' + i; plus.textContent = '+';
+      plus.setAttribute('aria-label', p.name + ' 수량 늘리기');
+      plus.onclick = () => changeQuantity(i, 1);
+      counter.append(minus, quantity, plus);
+      card.append(name, remaining, counter);
+      $('purchase-products').append(card);
+    });
+    updateControls();
+  }
+  function openPurchase() {
+    if (!stockReady || loading || locked()) return;
+    $('stock-page').hidden = true; $('purchase-page').hidden = false;
+    renderPurchase(); loadStock();
+  }
+  function showStock() {
+    if (locked()) return;
+    $('purchase-page').hidden = true; $('stock-page').hidden = false;
+    loadStock();
+  }
+  async function loadStock() {
+    if (loading || locked() || modalOpen()) return;
+    loading = true;
+    $('status').textContent = '재고를 불러오는 중입니다.';
+    updateControls();
+    try {
+      const data = await storeApi.getData();
+      if (!data || !Array.isArray(data.products) || data.products.length !== 8 ||
+          !data.products.every((p, i) => p && p.name === EXPECTED_NAMES[i] &&
+            Number.isSafeInteger(p.stock) && p.stock >= 0 &&
+            Number.isSafeInteger(p.price) && p.price > 0 &&
+            typeof p.image === 'string' && /^https:\/\//.test(p.image) &&
+            Object.hasOwn(limits, p.group)) ||
+          !data.limits || !Object.keys(limits).every(g => data.limits[g] === limits[g]) ||
+          !data.account || !['bank', 'number', 'holder'].every(k => typeof data.account[k] === 'string')) {
+        throw new Error('재고 데이터 형식이 올바르지 않습니다.');
+      }
+      products = data.products; account = data.account; stockReady = true;
+      let adjusted = false;
+      quantities = quantities.map(function (q, i) {
+        const next = Math.min(q, products[i].stock);
+        if (next !== q) adjusted = true;
+        return next;
+      });
+      renderStock(); renderPurchase();
+      $('status').textContent = (adjusted ? '재고가 줄어 선택 수량을 조정했습니다. ' : '') +
+        '마지막 갱신: ' + new Date().toLocaleTimeString('ko-KR');
+    } catch (error) {
+      stockReady = false;
+      $('products').replaceChildren(); $('purchase-products').replaceChildren();
+      $('status').textContent = '재고를 불러오지 못했습니다. 재고 화면에서 새로고침해 주세요. 계속 실패하면 시트의 상품명·순서·재고 수식을 확인해 주세요.';
+    } finally {
+      loading = false; updateControls();
+    }
+  }
+
+  // 첫 번째 구매 확정은 화면 확인만 합니다. 서버 저장 없음.
+  function confirmPurchase() {
+    if (submitting || draftOrder) return;
+    if (pendingOrder) { sendPendingOrder(); return; }
+    if (!stockReady || loading) return;
+    const name = $('buyer-name').value.trim();
+    const studentId = $('student-id').value.trim();
+    if (!name || name.length > 40 || /[\u0000-\u001f\u007f]/.test(name)) {
+      $('order-status').textContent = '이름을 올바르게 입력해 주세요.';
+      $('buyer-name').focus(); return;
+    }
+    if (!/^[0-9]{1,20}$/.test(studentId)) {
+      $('order-status').textContent = '학번을 1~20자리 숫자로 입력해 주세요.';
+      $('student-id').focus(); return;
+    }
+    if (quantities.every(q => q === 0)) return;
+    draftOrder = {
+      name, studentId, quantities: quantities.slice(),
+      expectedTotal: products.reduce((sum, p, i) => sum + p.price * quantities[i], 0)
+    };
+    $('order-status').textContent = '';
+    $('summary-buyer').textContent = name + ' · ' + studentId;
+    $('summary-lines').replaceChildren();
+    products.forEach(function (p, i) {
+      const q = draftOrder.quantities[i];
+      if (q === 0) return;
+      const line = document.createElement('div'); line.className = 'order-line';
+      const label = document.createElement('span');
+      label.textContent = p.name + ' ' + q + '개 (' + won(p.price) + '/개)';
+      const subtotal = document.createElement('span'); subtotal.textContent = won(p.price * q);
+      line.append(label, subtotal); $('summary-lines').append(line);
+    });
+    $('summary-total').textContent = won(draftOrder.expectedTotal);
+    $('summary-account').textContent = account.number + ' ' + account.bank + ' (' + account.holder + ')';
+    updateControls(); $('summary-dialog').showModal();
+  }
+  function closeSummary() {
+    if (submitting || pendingOrder) return;
+    $('summary-dialog').close(); draftOrder = null; updateControls();
+    $('confirm-purchase').focus();
+  }
+  function openPaymentConfirm() {
+    if (!draftOrder || submitting || pendingOrder || !$('summary-dialog').open) return;
+    $('summary-dialog').close();
+    $('payment-total').textContent = '입금 금액: ' + won(draftOrder.expectedTotal);
+    $('payment-dialog').showModal();
+  }
+  function backToSummary() {
+    if (!draftOrder || submitting || pendingOrder) return;
+    $('payment-dialog').close(); $('summary-dialog').showModal();
+  }
+  function submitConfirmedOrder() {
+    if (!draftOrder || submitting || pendingOrder || !$('payment-dialog').open) return;
+    // '네'를 누른 이 시점에만 실제 주문 요청을 만듭니다.
+    pendingOrder = Object.assign({}, draftOrder, {
+      orderId: crypto.randomUUID(), paymentConfirmed: true
+    });
+    draftOrder = null; $('payment-dialog').close();
+    sendPendingOrder();
+  }
+  async function sendPendingOrder() {
+    if (!pendingOrder || submitting) return;
+    submitting = true; updateControls();
+    $('order-status').textContent = '구매 기록을 저장하고 있습니다.';
+    try {
+      const result = await storeApi.submit(pendingOrder);
+      if (!result || typeof result.success !== 'boolean' ||
+          (result.success && result.orderId !== pendingOrder.orderId)) {
+        throw new Error('저장 결과를 확인하지 못했습니다.');
+      }
+      submitting = false;
+      if (!result.success) {
+        pendingOrder = null;
+        $('order-status').textContent = (result.message || '구매 내용을 확인해 주세요.') +
+          '\n구매 기록은 추가되지 않았습니다. 이미 입금했다면 재입금하지 말고 관리자에게 확인해 주세요.';
+        updateControls(); loadStock(); return;
+      }
+      pendingOrder = null; quantities = Array(8).fill(0);
+      $('buyer-name').value = ''; $('student-id').value = '';
+      $('order-status').textContent = '구매 기록이 저장되었습니다.\n재고 화면에서 남은 재고를 확인할 수 있습니다.';
+      updateControls(); loadStock();
+    } catch (error) {
+      submitting = false; updateControls();
+      $('order-status').textContent = '저장 결과를 확인하지 못했습니다.\n페이지를 새로고침하거나 닫지 말고 “같은 주문으로 다시 확인”을 눌러 주세요. 추가 입금은 하지 마세요.';
+    }
+  }
+  $('summary-dialog').addEventListener('cancel', function (event) {
+    event.preventDefault(); closeSummary();
+  });
+  $('payment-dialog').addEventListener('cancel', function (event) {
+    event.preventDefault(); backToSummary();
+  });
+  window.addEventListener('beforeunload', function (event) {
+    if (submitting || pendingOrder) { event.preventDefault(); event.returnValue = ''; }
+  });
+  loadStock();
+  setInterval(function () { if (!document.hidden) loadStock(); }, 30000);
+</script>
 </body>
 </html>
