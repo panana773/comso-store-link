@@ -60,20 +60,33 @@
       <button id="refresh" type="button" onclick="loadStock()">재고 새로고침</button>
       <button id="open-purchase" type="button" onclick="openPurchase()" disabled>구매하러 가기</button>
     </div>
+    <p id="purchase-notice" class="description" role="status"></p>
     <div id="products" class="grid"></div>
   </section>
-  <section id="purchase-page" hidden>
-    <button id="back-to-stock" class="secondary" type="button" onclick="showStock()">← 재고 화면</button>
-    <h1>물품 구매</h1>
-    <div class="panel">
+  <section id="identity-page" hidden>
+    <button id="identity-back" class="secondary" type="button" onclick="showStock()">← 재고 화면</button>
+    <h1>구매자 정보</h1>
+    <p class="description">이름과 학번을 입력하면 오늘 남은 구매 한도를 확인합니다. 회원가입이나 비밀번호는 필요하지 않습니다.</p>
+    <form id="buyer-form" class="panel">
       <label for="buyer-name">이름<input id="buyer-name" type="text" maxlength="40" placeholder="이름 입력" autocomplete="off" required></label>
       <label for="student-id">학번<input id="student-id" type="text" inputmode="numeric" maxlength="20" placeholder="학번 입력" autocomplete="off" required></label>
+      <button id="buyer-next" type="submit">다음</button>
+      <p id="buyer-status" class="description" role="status"></p>
+    </form>
+  </section>
+  <section id="purchase-page" hidden>
+    <div class="toolbar">
+      <button id="back-to-stock" class="secondary" type="button" onclick="showStock()">← 재고 화면</button>
+      <button id="change-buyer" class="secondary" type="button" onclick="openPurchase()">구매자 변경</button>
     </div>
+    <h1>물품 구매</h1>
+    <p id="current-buyer" class="description"></p>
     <div class="panel rule">
-      <strong>구매 1회당 선택 가능 수량</strong><br>
+      <strong>1인당 하루 구매 한도 (한국 시간 00:00 기준)</strong><br>
       라면: 세 상품 합계 최대 2개<br>컵밥: 세 상품 합계 최대 2개<br>
-      몬스터: 최대 3개<br>초콜릿: 최대 2개<br>각 상품의 남은 재고를 초과할 수 없습니다.
+      몬스터: 최대 2개<br>초콜릿: 최대 2개<br>각 상품의 남은 재고를 초과할 수 없습니다.
     </div>
+    <div id="daily-allowance" class="panel rule" aria-live="polite"></div>
     <div id="purchase-products" class="grid"></div>
     <div class="panel">
       <p id="selection-summary" aria-live="polite"></p>
@@ -133,12 +146,16 @@
     }
   }
   const storeApi = {
+    getBuyer(buyer) { return requestStore('getBuyerData', buyer); },
     getData() { return requestStore('getStoreData'); },
     submit(order) { return requestStore('submitOrder', order); }
   };
-  const EXPECTED_NAMES = ['까르보불닭', '신라면 투움바', '신라면 블랙', '순후추돼지국밥', '제육덮밥', '햇반', '몬스터', '초콜릿'];
+  const EXPECTED_NAMES = ['까르보불닭', '신라면 투움바', '신라면 블랙', '순후추돼지국밥', '제육덮밥', '오뚜기 작은밥', '몬스터', '초콜릿'];
+  let buyer = null;
+  let allowance = null;
+  let buyerLoading = false;
   let products = [];
-  let limits = { ramen: 2, rice: 2, monster: 3, chocolate: 2 };
+  let limits = { ramen: 2, rice: 2, monster: 2, chocolate: 2 };
   let account = null;
   let quantities = Array(8).fill(0);
   let loading = false;
@@ -149,15 +166,15 @@
   const $ = id => document.getElementById(id);
   const won = value => value.toLocaleString('ko-KR') + '원';
   const modalOpen = () => $('summary-dialog').open || $('payment-dialog').open;
-  const locked = () => submitting || !!pendingOrder || !!draftOrder;
+  const locked = () => buyerLoading || submitting || !!pendingOrder || !!draftOrder;
 
   function groupTotal(group) {
     return products.reduce((sum, p, i) => sum + (p.group === group ? quantities[i] : 0), 0);
   }
   function canIncrease(index) {
     const p = products[index];
-    return !!p && stockReady && !loading && !locked() &&
-      quantities[index] < p.stock && groupTotal(p.group) < limits[p.group];
+    return !!p && !!buyer && !!allowance && stockReady && !loading && !locked() &&
+      quantities[index] < p.stock && groupTotal(p.group) < allowance.remaining[p.group];
   }
   function changeQuantity(index, amount) {
     if (locked()) return;
@@ -171,18 +188,28 @@
       if ($('minus-' + i)) $('minus-' + i).disabled = locked() || quantities[i] === 0;
       if ($('plus-' + i)) $('plus-' + i).disabled = !canIncrease(i);
     }
-    $('selection-summary').textContent =
-      '라면 ' + groupTotal('ramen') + '/2개 · 컵밥 ' + groupTotal('rice') + '/2개 · ' +
-      '몬스터 ' + groupTotal('monster') + '/3개 · 초콜릿 ' + groupTotal('chocolate') + '/2개';
-    $('buyer-name').disabled = locked();
-    $('student-id').disabled = locked();
-    $('back-to-stock').disabled = locked();
+    const labels = { ramen: '라면', rice: '컵밥', monster: '몬스터', chocolate: '초콜릿' };
+    $('selection-summary').textContent = Object.keys(labels).map(g =>
+      labels[g] + ' ' + groupTotal(g) + '/' + (allowance ? allowance.remaining[g] : 0) + '개'
+    ).join(' · ');
+    $('daily-allowance').textContent = allowance
+      ? allowance.date + ' · ' + Object.keys(labels).map(g =>
+          labels[g] + ': 오늘 구매 ' + allowance.used[g] + '개 / 추가 가능 ' + allowance.remaining[g] + '개'
+        ).join(' · ')
+      : '오늘 구매 한도를 확인해야 합니다.';
+    $('current-buyer').textContent = buyer ? buyer.name + ' · ' + buyer.studentId : '';
+    $('identity-back').disabled = locked() || loading;
+    $('buyer-next').disabled = locked() || loading;
+    $('change-buyer').disabled = locked() || loading;
+    $('buyer-name').disabled = locked() || loading;
+    $('student-id').disabled = locked() || loading;
+    $('back-to-stock').disabled = locked() || loading;
     $('refresh').disabled = loading || locked();
     $('open-purchase').disabled = !stockReady || loading || locked();
     const button = $('confirm-purchase');
     button.textContent = submitting ? '구매 처리 중…' : pendingOrder ? '같은 주문으로 다시 확인' : '구매 확정';
     button.disabled = submitting || !!draftOrder || (!pendingOrder &&
-      (!stockReady || loading || quantities.every(q => q === 0)));
+      (!buyer || !allowance || !stockReady || loading || quantities.every(q => q === 0)));
   }
   function appendProductImage(card, product) {
     const box = document.createElement('div');
@@ -248,14 +275,55 @@
   }
   function openPurchase() {
     if (!stockReady || loading || locked()) return;
-    $('stock-page').hidden = true; $('purchase-page').hidden = false;
-    renderPurchase(); loadStock();
+    buyer = null; allowance = null; quantities = Array(8).fill(0);
+    $('buyer-name').value = ''; $('student-id').value = '';
+    $('buyer-status').textContent = ''; $('order-status').textContent = '';
+    $('purchase-notice').textContent = '';
+    $('stock-page').hidden = true; $('purchase-page').hidden = true;
+    $('identity-page').hidden = false; updateControls(); $('buyer-name').focus();
   }
   function showStock() {
-    if (locked()) return;
-    $('purchase-page').hidden = true; $('stock-page').hidden = false;
+    if (locked() || loading) return;
+    buyer = null; allowance = null; quantities = Array(8).fill(0);
+    $('buyer-name').value = ''; $('student-id').value = '';
+    $('purchase-page').hidden = true; $('identity-page').hidden = true; $('stock-page').hidden = false;
     loadStock();
   }
+  function validateBuyerData(data) {
+    if (!data || typeof data.success !== 'boolean') throw new Error('구매 한도 응답을 확인하지 못했습니다.');
+    if (!data.success) throw new Error(data.message || '구매 한도를 확인하지 못했습니다.');
+    const a = data.allowance;
+    if (!data.buyer || typeof data.buyer.name !== 'string' || typeof data.buyer.studentId !== 'string' ||
+        !a || !/^\d{4}-\d{2}-\d{2}$/.test(a.date) || !a.used || !a.remaining ||
+        !Object.keys(limits).every(g => Number.isSafeInteger(a.used[g]) && a.used[g] >= 0 &&
+          a.remaining[g] === Math.max(0, limits[g] - a.used[g]))) {
+      throw new Error('구매 한도 데이터 형식이 올바르지 않습니다.');
+    }
+    return data;
+  }
+  async function nextBuyer() {
+    if (locked() || loading) return;
+    const input = { name: $('buyer-name').value.trim(), studentId: $('student-id').value.trim() };
+    if (!input.name || input.name.length > 40 || /[\u0000-\u001f\u007f]/.test(input.name) ||
+        !/^[0-9]{1,20}$/.test(input.studentId)) {
+      $('buyer-status').textContent = '이름과 숫자로 된 학번을 올바르게 입력해 주세요.'; return;
+    }
+    buyerLoading = true; updateControls();
+    $('buyer-status').textContent = '오늘 구매 내역을 확인하고 있습니다.';
+    try {
+      const data = validateBuyerData(await storeApi.getBuyer(input));
+      buyer = data.buyer; allowance = data.allowance;
+      $('identity-page').hidden = true; $('purchase-page').hidden = false;
+      $('buyer-status').textContent = ''; renderPurchase();
+    } catch (error) {
+      buyer = null; allowance = null;
+      $('buyer-status').textContent = error.message || '다시 시도해 주세요.';
+    } finally { buyerLoading = false; updateControls(); }
+    if (buyer) await loadStock();
+  }
+  $('buyer-form').addEventListener('submit', function (event) {
+    event.preventDefault(); nextBuyer();
+  });
   async function loadStock() {
     if (loading || locked() || modalOpen()) return;
     loading = true;
@@ -273,43 +341,48 @@
           !data.account || !['bank', 'number', 'holder'].every(k => typeof data.account[k] === 'string')) {
         throw new Error('재고 데이터 형식이 올바르지 않습니다.');
       }
+      const buyerData = buyer ? validateBuyerData(await storeApi.getBuyer(buyer)) : null;
       products = data.products; account = data.account; stockReady = true;
+      allowance = buyerData ? buyerData.allowance : null;
       let adjusted = false;
       quantities = quantities.map(function (q, i) {
         const next = Math.min(q, products[i].stock);
         if (next !== q) adjusted = true;
         return next;
       });
+      if (allowance) {
+        const remaining = Object.assign({}, allowance.remaining);
+        quantities = quantities.map(function (q, i) {
+          const g = products[i].group;
+          const next = Math.min(q, remaining[g]); remaining[g] -= next;
+          if (next !== q) adjusted = true;
+          return next;
+        });
+      }
       renderStock(); renderPurchase();
-      $('status').textContent = (adjusted ? '재고가 줄어 선택 수량을 조정했습니다. ' : '') +
+      $('status').textContent = (adjusted ? '재고 또는 오늘 한도가 줄어 선택 수량을 조정했습니다. ' : '') +
         '마지막 갱신: ' + new Date().toLocaleTimeString('ko-KR');
     } catch (error) {
-      stockReady = false;
+      stockReady = false; allowance = null;
       $('products').replaceChildren(); $('purchase-products').replaceChildren();
-      $('status').textContent = '재고를 불러오지 못했습니다. 재고 화면에서 새로고침해 주세요. 계속 실패하면 시트의 상품명·순서·재고 수식을 확인해 주세요.';
+      $('status').textContent = (error.message || '재고 또는 구매 한도를 불러오지 못했습니다.') + ' 잠시 후 다시 확인하거나 관리자에게 문의해 주세요.';
     } finally {
       loading = false; updateControls();
     }
   }
 
   // 첫 번째 구매 확정은 화면 확인만 합니다. 서버 저장 없음.
-  function confirmPurchase() {
-    if (submitting || draftOrder) return;
+  async function confirmPurchase() {
+    if (submitting || draftOrder || buyerLoading) return;
     if (pendingOrder) { sendPendingOrder(); return; }
-    if (!stockReady || loading) return;
-    const name = $('buyer-name').value.trim();
-    const studentId = $('student-id').value.trim();
-    if (!name || name.length > 40 || /[\u0000-\u001f\u007f]/.test(name)) {
-      $('order-status').textContent = '이름을 올바르게 입력해 주세요.';
-      $('buyer-name').focus(); return;
-    }
-    if (!/^[0-9]{1,20}$/.test(studentId)) {
-      $('order-status').textContent = '학번을 1~20자리 숫자로 입력해 주세요.';
-      $('student-id').focus(); return;
-    }
+    if (!buyer || !allowance || !stockReady || loading) return;
+    // 계좌를 보여주기 직전에 한도와 재고를 다시 확인합니다.
+    await loadStock();
+    if (!buyer || !allowance || !stockReady) return;
+    const { name, studentId } = buyer;
     if (quantities.every(q => q === 0)) return;
     draftOrder = {
-      name, studentId, quantities: quantities.slice(),
+      name, studentId, purchaseDate: allowance.date, quantities: quantities.slice(),
       expectedTotal: products.reduce((sum, p, i) => sum + p.price * quantities[i], 0)
     };
     $('order-status').textContent = '';
@@ -371,7 +444,10 @@
       }
       pendingOrder = null; quantities = Array(8).fill(0);
       $('buyer-name').value = ''; $('student-id').value = '';
-      $('order-status').textContent = '구매 기록이 저장되었습니다.\n재고 화면에서 남은 재고를 확인할 수 있습니다.';
+      buyer = null; allowance = null;
+      $('purchase-page').hidden = true; $('identity-page').hidden = true; $('stock-page').hidden = false;
+      $('purchase-notice').textContent = '구매 기록이 저장되었습니다. 감사합니다.';
+      $('order-status').textContent = '';
       updateControls(); loadStock();
     } catch (error) {
       submitting = false; updateControls();
