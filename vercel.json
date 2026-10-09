@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "여기에_Apps_Script_웹앱_URL",
+      "permanent": false
+    }
+  ]
+}
