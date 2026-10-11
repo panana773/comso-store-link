@@ -31,7 +31,6 @@
     .counter button { width: 40px; height: 40px; padding: 0; font-size: 22px; }
     .counter output { font-size: 22px; font-weight: bold; }
     .remaining { color: #667085; font-size: 14px; }
-    #selection-summary { line-height: 1.8; font-weight: bold; }
     #order-status { white-space: pre-line; overflow-wrap: anywhere; }
     .image-box { height: 150px; margin-bottom: 16px; display: grid; place-items: center; border-radius: 10px; background: white; overflow: hidden; }
     .product-image { width: 100%; height: 150px; padding: 8px; object-fit: contain; }
@@ -48,7 +47,15 @@
     .dialog-actions button { flex: 1; }
     @media (min-width: 760px) { .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
     @media (max-width: 360px) { .grid { grid-template-columns: 1fr; } }
-    #daily-allowance, #selection-summary { white-space: pre-line; }
+    .limit-title { margin: 0; font-size: 20px; font-weight: 700; color: #182230; }
+    .limit-date, .limit-note { margin: 6px 0 0; font-size: 13px; color: #667085; }
+    .limit-row { padding: 12px 0; border-bottom: 1px solid #eef0f4; }
+    .limit-row:last-child { border-bottom: 0; padding-bottom: 4px; }
+    .limit-rule { margin: 0; font-size: 15px; line-height: 1.6; color: #344054; }
+    .limit-rule strong { color: #182230; }
+    .limit-detail { margin: 4px 0 0; font-size: 14px; color: #667085; }
+    .limit-left { color: #2563eb; font-weight: 700; white-space: nowrap; }
+    .limit-left.exhausted { color: #b42318; }
     .copy-account { margin-top: 12px; }
     #copy-status { margin: 8px 0 0; font-size: 14px; }
     #manual-account { font-size: 16px; }
@@ -96,15 +103,14 @@
     </div>
     <h1>물품 구매</h1>
     <p id="current-buyer" class="description"></p>
-    <div class="panel rule">
-      <strong>1인당 하루 구매 한도 (한국 시간 00:00 기준)</strong><br>
-      라면: 세 상품 합계 최대 2개<br>컵밥: 세 상품 합계 최대 2개<br>
-      몬스터: 최대 2개<br>초콜릿: 최대 2개<br>각 상품의 남은 재고를 초과할 수 없습니다.
-    </div>
-    <div id="daily-allowance" class="panel rule" aria-live="polite"></div>
+    <section class="panel rule" aria-labelledby="limit-title">
+      <h2 id="limit-title" class="limit-title">1인당 하루 구매 한도</h2>
+      <p id="limit-date" class="limit-date">한국 시간 00:00 기준</p>
+      <div id="daily-allowance" aria-live="polite"></div>
+      <p class="limit-note">각 상품의 남은 재고 내에서 선택할 수 있습니다.</p>
+    </section>
     <div id="purchase-products" class="grid"></div>
     <div class="panel">
-      <p id="selection-summary" aria-live="polite"></p>
       <button id="confirm-purchase" type="button" onclick="confirmPurchase()" disabled>구매 확정</button>
       <p id="order-status" class="description" role="status" aria-live="polite"></p>
     </div>
@@ -119,10 +125,10 @@
   <div id="summary-lines"></div>
   <div class="total"><span>총 가격</span><strong id="summary-total"></strong></div>
   <div class="account"><strong>입금 계좌</strong><br><span id="summary-account"></span></div>
-  <button id="copy-account" class="secondary copy-account" type="button" onclick="copyAccount()">계좌번호 복사</button>
+  <button id="copy-account" class="secondary copy-account" type="button" onclick="copyAccount()">입금 정보 복사</button>
   <p id="copy-status" class="description" role="status" aria-live="polite"></p>
-  <label id="manual-account-label" hidden>계좌번호 직접 복사
-    <input id="manual-account" type="text" readonly aria-label="복사할 계좌번호">
+  <label id="manual-account-label" hidden>입금 정보 직접 복사
+    <input id="manual-account" type="text" readonly aria-label="복사할 입금 정보">
   </label>
   <p class="description">위 계좌로 정확한 금액을 입금한 뒤 구매를 확정해 주세요.</p>
   <div class="dialog-actions">
@@ -208,15 +214,7 @@
       if ($('minus-' + i)) $('minus-' + i).disabled = locked() || quantities[i] === 0;
       if ($('plus-' + i)) $('plus-' + i).disabled = !canIncrease(i);
     }
-    const labels = { ramen: '라면', rice: '컵밥', monster: '몬스터', chocolate: '초콜릿' };
-    $('selection-summary').textContent = Object.keys(labels).map(g =>
-      labels[g] + ': 선택 ' + groupTotal(g) + '개 · 선택 가능 ' + (allowance ? allowance.remaining[g] : 0) + '개'
-    ).join('\n');
-    $('daily-allowance').textContent = allowance
-      ? allowance.date + ' 오늘 구매 현황\n' + Object.keys(labels).map(g =>
-          labels[g] + '\n  오늘 구매 ' + allowance.used[g] + '개 · 추가 가능 ' + allowance.remaining[g] + '개'
-        ).join('\n')
-      : '오늘 구매 한도를 확인해야 합니다.';
+    renderAllowance();
     $('current-buyer').textContent = buyer ? buyer.name + ' · ' + buyer.studentId : '';
     $('identity-back').disabled = locked() || loading;
     $('buyer-next').disabled = locked() || loading;
@@ -230,6 +228,37 @@
     button.textContent = submitting ? '구매 처리 중…' : pendingOrder ? '같은 주문으로 다시 확인' : '구매 확정';
     button.disabled = submitting || !!draftOrder || (!pendingOrder &&
       (!buyer || !allowance || !stockReady || loading || quantities.every(q => q === 0)));
+  }
+  function renderAllowance() {
+    const labels = { ramen: '라면', rice: '컵밥', monster: '몬스터', chocolate: '초콜릿' };
+    $('limit-date').textContent = (allowance ? allowance.date + ' · ' : '') + '한국 시간 00:00 기준';
+    const container = $('daily-allowance');
+    // 수량 +/-를 누를 때 변하지 않는 한도 안내를 매번 다시 만들지 않습니다.
+    const signature = JSON.stringify(allowance);
+    if (container.dataset.signature === signature) return;
+    container.dataset.signature = signature;
+    container.replaceChildren();
+    for (const group of Object.keys(labels)) {
+      const row = document.createElement('div'); row.className = 'limit-row';
+      const rule = document.createElement('p'); rule.className = 'limit-rule';
+      const title = document.createElement('strong'); title.textContent = labels[group] + ': ';
+      const description = document.createElement('span');
+      description.textContent = (group === 'ramen' || group === 'rice' ? '세 상품 합계 ' : '') + '최대 ' + limits[group] + '개';
+      rule.append(title, description);
+      const detail = document.createElement('p'); detail.className = 'limit-detail';
+      if (allowance) {
+        const used = document.createElement('span'); used.textContent = '오늘 구매 ' + allowance.used[group] + '개 · ';
+        const left = document.createElement('span');
+        left.className = 'limit-left' + (allowance.remaining[group] === 0 ? ' exhausted' : '');
+        left.textContent = '추가 가능 ' + allowance.remaining[group] + '개';
+        detail.append(used, left);
+      } else { detail.textContent = '오늘 구매 한도를 확인해야 합니다.'; }
+      row.append(rule, detail); container.append(row);
+    }
+  }
+  function transferText() {
+    if (!account || !draftOrder) return '';
+    return account.number + ' ' + account.bank + ' (' + account.holder + ') ' + draftOrder.expectedTotal + '원';
   }
   function appendProductImage(card, product) {
     const box = document.createElement('div');
@@ -421,27 +450,27 @@
     $('summary-account').textContent = account.number + ' ' + account.bank + ' (' + account.holder + ')';
     $('copy-status').textContent = '';
     $('manual-account-label').hidden = true;
-    $('manual-account').value = account.number;
+    $('manual-account').value = transferText();
     updateControls(); $('summary-dialog').showModal();
   }
   async function copyAccount() {
-    if (!account || !$('summary-dialog').open) return;
+    if (!account || !draftOrder || !$('summary-dialog').open) return;
     const button = $('copy-account');
     if (button.disabled) return;
     button.disabled = true;
-    const number = account.number;
+    const text = transferText();
     try {
       if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error('Clipboard unavailable');
-      await navigator.clipboard.writeText(number);
-      $('copy-status').textContent = '계좌번호를 복사했습니다.';
+      await navigator.clipboard.writeText(text);
+      $('copy-status').textContent = '입금 정보를 복사했습니다.';
       $('manual-account-label').hidden = true;
     } catch (error) {
-      $('copy-status').textContent = '자동 복사가 안 되면 아래 계좌번호를 길게 누르거나 Ctrl+C로 복사해 주세요.';
+      $('copy-status').textContent = '자동 복사가 안 되면 아래 입금 정보를 길게 누르거나 Ctrl+C로 복사해 주세요.';
       $('manual-account-label').hidden = false;
       const input = $('manual-account');
-      input.value = number;
+      input.value = text;
       if ($('summary-dialog').open) {
-        input.focus(); input.select(); input.setSelectionRange(0, number.length);
+        input.focus(); input.select(); input.setSelectionRange(0, text.length);
       }
     } finally { button.disabled = false; }
   }
