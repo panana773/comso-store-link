@@ -48,6 +48,21 @@
     .dialog-actions button { flex: 1; }
     @media (min-width: 760px) { .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
     @media (max-width: 360px) { .grid { grid-template-columns: 1fr; } }
+    #daily-allowance, #selection-summary { white-space: pre-line; }
+    .copy-account { margin-top: 12px; }
+    #copy-status { margin: 8px 0 0; font-size: 14px; }
+    #manual-account { font-size: 16px; }
+    @media (max-width: 759px) {
+      #purchase-page .panel { margin: 12px 0; padding: 14px; }
+      #purchase-products { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+      #purchase-products .image-box { display: none; }
+      #purchase-products .card { padding: 12px; border-radius: 12px; }
+      #purchase-products .card h3 { margin-bottom: 6px; font-size: 15px; line-height: 1.4; word-break: keep-all; }
+      #purchase-products .remaining { margin: 0; font-size: 13px; }
+      #purchase-products .counter { margin-top: 10px; gap: 4px; }
+      #purchase-products .counter button { width: 40px; min-width: 40px; height: 44px; }
+      #purchase-products .counter output { font-size: 20px; }
+    }
   </style>
 </head>
 <body>
@@ -104,6 +119,11 @@
   <div id="summary-lines"></div>
   <div class="total"><span>총 가격</span><strong id="summary-total"></strong></div>
   <div class="account"><strong>입금 계좌</strong><br><span id="summary-account"></span></div>
+  <button id="copy-account" class="secondary copy-account" type="button" onclick="copyAccount()">계좌번호 복사</button>
+  <p id="copy-status" class="description" role="status" aria-live="polite"></p>
+  <label id="manual-account-label" hidden>계좌번호 직접 복사
+    <input id="manual-account" type="text" readonly aria-label="복사할 계좌번호">
+  </label>
   <p class="description">위 계좌로 정확한 금액을 입금한 뒤 구매를 확정해 주세요.</p>
   <div class="dialog-actions">
     <button class="secondary" type="button" onclick="closeSummary()">뒤로가기</button>
@@ -190,12 +210,12 @@
     }
     const labels = { ramen: '라면', rice: '컵밥', monster: '몬스터', chocolate: '초콜릿' };
     $('selection-summary').textContent = Object.keys(labels).map(g =>
-      labels[g] + ' ' + groupTotal(g) + '/' + (allowance ? allowance.remaining[g] : 0) + '개'
-    ).join(' · ');
+      labels[g] + ': 선택 ' + groupTotal(g) + '개 · 선택 가능 ' + (allowance ? allowance.remaining[g] : 0) + '개'
+    ).join('\n');
     $('daily-allowance').textContent = allowance
-      ? allowance.date + ' · ' + Object.keys(labels).map(g =>
-          labels[g] + ': 오늘 구매 ' + allowance.used[g] + '개 / 추가 가능 ' + allowance.remaining[g] + '개'
-        ).join(' · ')
+      ? allowance.date + ' 오늘 구매 현황\n' + Object.keys(labels).map(g =>
+          labels[g] + '\n  오늘 구매 ' + allowance.used[g] + '개 · 추가 가능 ' + allowance.remaining[g] + '개'
+        ).join('\n')
       : '오늘 구매 한도를 확인해야 합니다.';
     $('current-buyer').textContent = buyer ? buyer.name + ' · ' + buyer.studentId : '';
     $('identity-back').disabled = locked() || loading;
@@ -399,7 +419,31 @@
     });
     $('summary-total').textContent = won(draftOrder.expectedTotal);
     $('summary-account').textContent = account.number + ' ' + account.bank + ' (' + account.holder + ')';
+    $('copy-status').textContent = '';
+    $('manual-account-label').hidden = true;
+    $('manual-account').value = account.number;
     updateControls(); $('summary-dialog').showModal();
+  }
+  async function copyAccount() {
+    if (!account || !$('summary-dialog').open) return;
+    const button = $('copy-account');
+    if (button.disabled) return;
+    button.disabled = true;
+    const number = account.number;
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error('Clipboard unavailable');
+      await navigator.clipboard.writeText(number);
+      $('copy-status').textContent = '계좌번호를 복사했습니다.';
+      $('manual-account-label').hidden = true;
+    } catch (error) {
+      $('copy-status').textContent = '자동 복사가 안 되면 아래 계좌번호를 길게 누르거나 Ctrl+C로 복사해 주세요.';
+      $('manual-account-label').hidden = false;
+      const input = $('manual-account');
+      input.value = number;
+      if ($('summary-dialog').open) {
+        input.focus(); input.select(); input.setSelectionRange(0, number.length);
+      }
+    } finally { button.disabled = false; }
   }
   function closeSummary() {
     if (submitting || pendingOrder) return;
