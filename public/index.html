@@ -111,7 +111,12 @@
     </section>
     <div id="purchase-products" class="grid"></div>
     <div class="panel">
-      <button id="confirm-purchase" type="button" onclick="confirmPurchase()" disabled>구매 확정</button>
+      <p style="margin: 0 0 12px; font-size: 13px; line-height: 1.6; color: #667085;">
+        버튼을 누르면 구매한 물품 목록, 가격, 입금 계좌가 나오는 창이 뜹니다!
+      </p>
+      <button id="confirm-purchase" type="button" onclick="confirmPurchase()" disabled>
+        결제 진행하기
+      </button>
       <p id="order-status" class="description" role="status" aria-live="polite"></p>
     </div>
   </section>
@@ -225,7 +230,7 @@
     $('refresh').disabled = loading || locked();
     $('open-purchase').disabled = !stockReady || loading || locked();
     const button = $('confirm-purchase');
-    button.textContent = submitting ? '구매 처리 중…' : pendingOrder ? '같은 주문으로 다시 확인' : '구매 확정';
+    button.textContent = submitting ? '구매 처리 중…' : pendingOrder ? '같은 주문으로 다시 확인' : '결제 진행하기';
     button.disabled = submitting || !!draftOrder || (!pendingOrder &&
       (!buyer || !allowance || !stockReady || loading || quantities.every(q => q === 0)));
   }
